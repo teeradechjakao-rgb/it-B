@@ -103,8 +103,7 @@ class ExchangePostController extends Controller
                 'images',
                 // ดึงเฉพาะคอมเมนต์หลัก (parent_id เป็น null) และพ่วง replies พร้อม user ของฝั่ง replies ด้วย
                 'comments' => function ($query) {
-                    $query->whereNull('parent_id')
-                          ->with(['user:id,name,email,avatar', 'replies.user:id,name,email,avatar'])
+                    $query->with('user:id,name,email,avatar')
                           ->latest();
                 }
             ])
