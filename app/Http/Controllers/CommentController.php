@@ -48,10 +48,25 @@ class CommentController extends Controller
 
         $validated = $request->validate([
             'content' => 'required|string|max:1000',
+            'rating' => 'nullable|integer|min:1|max:5',
+            'parent_id' => 'nullable|integer|exists:comments,id',
         ], [
             'content.required' => 'กรุณากรอกข้อความคอมเมนต์',
             'content.max' => 'คอมเมนต์ต้องไม่เกิน 1000 ตัวอักษร',
         ]);
+
+        $parentId = $validated['parent_id'] ?? null;
+
+        if ($parentId) {
+            $parent = Comment::where('id', $parentId)
+                ->where('exchange_post_id', $post->id)
+                ->whereNull('parent_id')
+                ->first();
+
+            if (!$parent) {
+                return response()->json(['message' => 'ไม่พบความคิดเห็นหลักที่ต้องการตอบกลับ'], 422);
+            }
+        }
 
         $comment = new Comment($validated);
         $comment->user_id = $request->user()->id;
