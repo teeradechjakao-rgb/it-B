@@ -56,6 +56,29 @@ class ReviewController extends Controller
         return response()->json($review);
     }
 
+    public function update(Request $request, $id)
+    {
+        $review = Review::findOrFail($id);
+
+        if ($review->user_id !== $request->user()->id && $request->user()->role !== 'admin') {
+            return response()->json(['message' => 'คุณไม่มีสิทธิ์แก้ไขรีวิวนี้'], 403);
+        }
+
+        $validated = $request->validate([
+            'category_id' => 'required|exists:categories,id',
+            'gadget_name' => 'required|string|max:255',
+            'rating' => 'required|integer|min:1|max:5',
+            'content' => 'required|string',
+        ]);
+
+        $review->update($validated);
+
+        return response()->json([
+            'message' => 'แก้ไขรีวิวเรียบร้อยแล้ว',
+            'review' => $review->load(['user:id,name,email,avatar', 'category']),
+        ]);
+    }
+
     public function destroy(Request $request, $id)
     {
         $review = Review::findOrFail($id);
