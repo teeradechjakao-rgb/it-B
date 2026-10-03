@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ExchangePost;
 use App\Models\Like;
+use App\Models\Comment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
@@ -12,19 +13,18 @@ class ExchangePostController extends Controller
     // 1. แสดงรายการโพสต์ + ค้นหาคีย์เวิร์ด + กรองหมวดหมู่ + แบ่งหน้า
     public function index(Request $request)
     {
-        // route นี้เป็น public ใช้ guard('sanctum') เพื่อรู้ว่าถ้ามีคนแนบ token มา เขาเป็นใคร (ไว้เช็ค is_liked)
         $currentUser = $request->user('sanctum');
 
         $query = ExchangePost::with(['user:id,name,email,avatar', 'category', 'images'])
-            ->withCount('likes') // [เพิ่มใหม่] นับจำนวนไลค์ของแต่ละโพสต์
+            ->withCount('likes')
             ->where('status', 'open');
 
         if ($request->filled('keyword')) {
             $keyword = $request->keyword;
             $query->where(function ($q) use ($keyword) {
                 $q->where('title', 'like', '%' . $keyword . '%')
-                  ->orWhere('description', 'like', '%' . $keyword . '%')
-                  ->orWhere('looking_for', 'like', '%' . $keyword . '%');
+                    ->orWhere('description', 'like', '%' . $keyword . '%')
+                    ->orWhere('looking_for', 'like', '%' . $keyword . '%');
             });
         }
 
@@ -34,7 +34,6 @@ class ExchangePostController extends Controller
 
         $posts = $query->latest()->paginate(10);
 
-        // [เพิ่มใหม่] ใส่ flag is_liked ให้แต่ละโพสต์ ว่าคนที่ล็อกอินอยู่กดไลค์ไปแล้วหรือยัง
         if ($currentUser) {
             $likedPostIds = Like::where('user_id', $currentUser->id)->pluck('exchange_post_id')->toArray();
             $posts->getCollection()->transform(function ($post) use ($likedPostIds) {
@@ -75,9 +74,6 @@ class ExchangePostController extends Controller
 
         $post = new ExchangePost($validated);
         $post->user_id = $request->user()->id;
-
-        // [เพิ่มใหม่] สมาชิกทั่วไปโพสต์ใหม่ต้องรอแอดมินอนุมัติก่อน (pending)
-        // แอดมินโพสต์เอง ให้ผ่านทันทีไม่ต้องรออนุมัติตัวเอง
         $post->status = $request->user()->role === 'admin' ? 'open' : 'pending';
         $post->save();
 
@@ -98,17 +94,25 @@ class ExchangePostController extends Controller
         ], 201);
     }
 
-    // 3. ดูรายละเอียดโพสต์รายตัว
+    // 3. ดูรายละเอียดโพสต์รายตัว (ปรับปรุงการดึงคอมเมนต์หลักและคอมเมนต์ตอบกลับพร้อมข้อมูล User)
     public function show(Request $request, $id)
     {
-        $post = ExchangePost::with(['user:id,name,email,avatar', 'category', 'images'])
-            ->withCount('likes') // [เพิ่มใหม่]
+        $post = ExchangePost::with([
+                'user:id,name,email,avatar',
+                'category',
+                'images',
+                // ดึงเฉพาะคอมเมนต์หลัก (parent_id เป็น null) และพ่วง replies พร้อม user ของฝั่ง replies ด้วย
+                'comments' => function ($query) {
+                    $query->whereNull('parent_id')
+                          ->with(['user:id,name,email,avatar', 'replies.user:id,name,email,avatar'])
+                          ->latest();
+                }
+            ])
+            ->withCount('likes')
             ->findOrFail($id);
 
-        // route นี้เป็น public ต้องใช้ guard('sanctum') ตรงๆ เพื่อรู้ว่าถ้ามีคนแนบ token มา เขาเป็นใคร
         $currentUser = $request->user('sanctum');
 
-        // โพสต์ที่ไม่ใช่สถานะ open (pending/closed/hidden) ห้ามคนอื่นเห็น ต้องเป็นเจ้าของหรือแอดมินเท่านั้น
         if ($post->status !== 'open') {
             $isOwner = $currentUser && $currentUser->id === $post->user_id;
             $isAdmin = $currentUser && $currentUser->role === 'admin';
@@ -118,7 +122,6 @@ class ExchangePostController extends Controller
             }
         }
 
-        // [เพิ่มใหม่] เช็คว่าคนที่ล็อกอินอยู่ไลค์โพสต์นี้ไปแล้วหรือยัง
         $post->is_liked = $currentUser
             ? Like::where('user_id', $currentUser->id)->where('exchange_post_id', $post->id)->exists()
             : false;
@@ -141,13 +144,12 @@ class ExchangePostController extends Controller
             'description' => 'required|string',
             'condition_percent' => 'required|integer|min:0|max:100',
             'looking_for' => 'nullable|string',
-            // เจ้าของเปลี่ยนได้เฉพาะ open/closed เอง ห้ามแตะ pending/hidden (ต้องผ่านแอดมินเท่านั้น)
             'status' => 'nullable|in:open,closed',
             'images.*' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048'
         ], [
             'condition_percent.min' => 'สภาพสินค้าต้องไม่ต่ำกว่า 0%',
             'condition_percent.max' => 'สภาพสินค้าต้องไม่เกิน 100%',
-            'status.in' => 'สถานะไม่ถูกต้อง (เจ้าของเปลี่ยนได้เฉพาะ เปิด/ปิด การแลกเปลี่ยนเท่านั้น)',
+            'status.in' => 'สถานะไม่ถูกต้อง',
         ]);
 
         $post->update($validated);
@@ -190,7 +192,7 @@ class ExchangePostController extends Controller
         return response()->json(['message' => 'ลบโพสต์เรียบร้อยแล้ว']);
     }
 
-    // 6. ดึงโพสต์ทั้งหมดของผู้ใช้ที่ล็อกอินอยู่ (สำหรับหน้าโปรไฟล์) ไม่กรองสถานะ
+    // 6. ดึงโพสต์ทั้งหมดของผู้ใช้ที่ล็อกอินอยู่
     public function myPosts(Request $request)
     {
         $posts = ExchangePost::with(['category', 'images'])
@@ -202,7 +204,7 @@ class ExchangePostController extends Controller
         return response()->json($posts);
     }
 
-    // 7. [เพิ่มใหม่] กดไลค์ / ยกเลิกไลค์ (toggle) ต้องล็อกอิน
+    // 7. กดไลค์ / ยกเลิกไลค์ (toggle)
     public function toggleLike(Request $request, $id)
     {
         $post = ExchangePost::findOrFail($id);
@@ -211,11 +213,9 @@ class ExchangePostController extends Controller
         $existingLike = Like::where('user_id', $userId)->where('exchange_post_id', $post->id)->first();
 
         if ($existingLike) {
-            // เคยไลค์แล้ว กดอีกครั้ง = ยกเลิกไลค์
             $existingLike->delete();
             $liked = false;
         } else {
-            // ยังไม่เคยไลค์ กดครั้งนี้ = เพิ่มไลค์ใหม่
             Like::create([
                 'user_id' => $userId,
                 'exchange_post_id' => $post->id,
@@ -228,5 +228,45 @@ class ExchangePostController extends Controller
             'liked' => $liked,
             'likes_count' => $post->likes()->count(),
         ]);
+    }
+
+    // 8. จัดการคอมเมนต์และตอบกลับ
+    public function storeComment(Request $request, $id)
+    {
+        $request->validate([
+            'content'   => 'required|string',
+            'rating'    => 'nullable|integer|min:1|max:5',
+            'parent_id' => 'nullable|exists:comments,id',
+        ]);
+
+        $comment = Comment::create([
+            'exchange_post_id' => $id,
+            'user_id'          => $request->user()->id,
+            'content'          => $request->content,
+            'rating'           => $request->rating ?? 5,
+            'parent_id'        => $request->parent_id ?? null,
+        ]);
+
+        // โหลดข้อมูล user และ replies (ถ้ามี) กลับไปให้ฝั่ง React
+        $comment->load(['user:id,name,email,avatar', 'replies.user:id,name,email,avatar']);
+
+        return response()->json([
+            'message' => 'เพิ่มความคิดเห็นสำเร็จ',
+            'comment' => $comment
+        ], 201);
+    }
+
+    // 9. ลบความคิดเห็น
+    public function destroyComment(Request $request, $commentId)
+    {
+        $comment = Comment::findOrFail($commentId);
+
+        if ($comment->user_id !== $request->user()->id && $request->user()->role !== 'admin') {
+            return response()->json(['message' => 'คุณไม่มีสิทธิ์ลบความคิดเห็นนี้'], 403);
+        }
+
+        $comment->delete();
+
+        return response()->json(['message' => 'ลบความคิดเห็นสำเร็จ']);
     }
 }

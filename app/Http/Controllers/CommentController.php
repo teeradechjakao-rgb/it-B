@@ -13,7 +13,6 @@ class CommentController extends Controller
     {
         $post = ExchangePost::findOrFail($postId);
 
-        // route นี้เป็น public เหมือนกัน ใช้ guard('sanctum') แบบเดียวกับ show()
         $currentUser = $request->user('sanctum');
 
         if ($post->status !== 'open') {
@@ -38,7 +37,6 @@ class CommentController extends Controller
     {
         $post = ExchangePost::findOrFail($postId);
 
-        // route นี้อยู่ใต้ auth:sanctum อยู่แล้ว $request->user() ใช้ได้ปกติ ไม่ null แน่นอน
         if ($post->status !== 'open') {
             $isOwner = $request->user()->id === $post->user_id;
             $isAdmin = $request->user()->role === 'admin';
@@ -66,7 +64,7 @@ class CommentController extends Controller
         ], 201);
     }
 
-    // แก้ไขคอมเมนต์ (เฉพาะเจ้าของเท่านั้น ตามใบงาน)
+    // แก้ไขคอมเมนต์ (เฉพาะเจ้าของเท่านั้น)
     public function update(Request $request, $id)
     {
         $comment = Comment::findOrFail($id);
@@ -103,5 +101,4 @@ class CommentController extends Controller
 
         return response()->json(['message' => 'ลบคอมเมนต์เรียบร้อยแล้ว']);
     }
-     // ลบคอมเมนต์ (เจ้าของ หรือ Admin)
 }
