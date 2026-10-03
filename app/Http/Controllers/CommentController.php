@@ -103,4 +103,5 @@ class CommentController extends Controller
 
         return response()->json(['message' => 'ลบคอมเมนต์เรียบร้อยแล้ว']);
     }
+     // ลบคอมเมนต์ (เจ้าของ หรือ Admin)
 }
