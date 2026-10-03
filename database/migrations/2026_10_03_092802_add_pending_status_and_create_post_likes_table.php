@@ -1,0 +1,35 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        // 1. เพิ่มสถานะ 'pending' ให้ exchange_posts (รออนุมัติจากแอดมิน)
+        // Laravel ไม่มี helper แก้ enum ตรงๆ ต้องใช้ SQL ดิบ
+        DB::statement("ALTER TABLE exchange_posts MODIFY COLUMN status ENUM('pending', 'open', 'closed', 'hidden') NOT NULL DEFAULT 'pending'");
+
+        // 2. สร้างตาราง post_likes (ระบบไลค์แบบสลับกด)
+        Schema::create('post_likes', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->constrained()->onDelete('cascade');
+            $table->foreignId('exchange_post_id')->constrained()->onDelete('cascade');
+            $table->timestamps();
+
+            // กันไม่ให้ user คนเดียวกันไลค์โพสต์เดียวกันซ้ำสอง
+            $table->unique(['user_id', 'exchange_post_id']);
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('post_likes');
+
+        DB::statement("UPDATE exchange_posts SET status = 'open' WHERE status = 'pending'");
+        DB::statement("ALTER TABLE exchange_posts MODIFY COLUMN status ENUM('open', 'closed', 'hidden') NOT NULL DEFAULT 'open'");
+    }
+};
